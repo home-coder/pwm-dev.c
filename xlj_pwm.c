@@ -12,23 +12,25 @@
 #include <linux/semaphore.h>
 #include <linux/sched.h>
 #include <linux/string.h>
+#include <linux/pwm.h>
 
 #define DEVNAME "xlj-pwm"
+
+typedef struct {
+	u32 channel;
+	u32 polarity;
+	u32 period_ns;
+	u32 duty_ns;
+	u32 enabled;
+} pwm_info;
 
 typedef struct {
 	struct cdev cdev;
 	dev_t devid;
 	struct class *class;
 	struct device *device;
-
-	struct {
-		unsigned int dev;
-		u32 channel;
-		u32 polarity;
-		u32 period_ns;
-		u32 duty_ns;
-		u32 enabled;
-	} pwm_info;
+	struct pwm_device *pwm_dev;
+	pwm_info pwminfo;
 } xlj_pwm;
 
 static int xpwm_open(struct inode *inode, struct file *filp)
@@ -52,6 +54,42 @@ static struct file_operations xpwm_fops = {
 	.release    = xpwm_release,
 	.unlocked_ioctl = xpwm_unlocked_ioctl,
 };
+
+static struct pwm_device *platform_pwm_request(int pwm_id)
+{
+	struct pwm_device *pwm_dev;
+
+	pwm_dev = pwm_request(pwm_id, "xlj-pwm");
+	if(NULL == pwm_dev || IS_ERR(pwm_dev)) {
+		printk("xlj pwm request pwm %d fail!\n", pwm_id);
+	} else {
+		printk("xlj pwm request pwm %d success!\n", pwm_id);
+	}
+
+	return pwm_dev;
+}
+
+static void test_ioctl_pwm(xlj_pwm *xpwm)
+{
+	int divides = 30;
+	xpwm->pwminfo.polarity = 1;
+	xpwm->pwminfo.period_ns = 1000*1000*1000 / 20000;
+	xpwm->pwminfo.duty_ns = (divides * xpwm->pwminfo.period_ns) / 256;
+	pwm_set_polarity(xpwm->pwm_dev, xpwm->pwminfo.polarity);
+	pwm_config(xpwm->pwm_dev, xpwm->pwminfo.duty_ns, xpwm->pwminfo.period_ns);
+	pwm_enable(xpwm->pwm_dev);
+}
+
+static void xlj_pwm_setup(xlj_pwm *xpwm)
+{
+	xpwm->pwminfo.channel = 1;
+	xpwm->pwm_dev = platform_pwm_request(xpwm->pwminfo.channel);	
+	//FIXME test pwm function
+	while (1) {
+		test_ioctl_pwm(xpwm);
+		msleep(1);
+	}
+}
 
 static int __devinit xlj_pwm_probe(struct platform_device *pdev)
 {
@@ -85,6 +123,9 @@ static int __devinit xlj_pwm_probe(struct platform_device *pdev)
 		goto fail2;
 	}
 
+	printk("=====================setup===========================\n");
+	xlj_pwm_setup(xpwm);
+
 	return 0;
 
 fail2:
@@ -116,7 +157,6 @@ static struct platform_device xlj_pwm_device = {
 	.name   = "xlj_pwm",
 	.id = -1,
 };
-
 
 static __init int module_xlj_pwm_init(void)
 {
