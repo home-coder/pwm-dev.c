@@ -14,14 +14,16 @@
 #include <linux/string.h>
 #include <linux/pwm.h>
 
-#define DEVNAME     "xlj-pwm"
-#define TEST_PWM    1 
+#define DEVNAME            "xlj-pwm"
+#define TEST_PWM		   1
+#define XLJ_PWM_CHANNEL    0
 
 typedef struct {
 	u32 channel;
 	u32 polarity;
 	u32 period_ns;
 	u32 duty_ns;
+	u32 divides;
 	u32 enabled;
 } pwm_info;
 
@@ -33,6 +35,52 @@ typedef struct {
 	struct pwm_device *pwm_dev;
 	pwm_info pwminfo;
 } xlj_pwm;
+
+static struct pwm_device *platform_pwm_request(int pwm_id)
+{
+	struct pwm_device *pwm_dev;
+
+	pwm_dev = pwm_request(pwm_id, "xlj-pwm");
+	if (NULL == pwm_dev || IS_ERR(pwm_dev)) {
+		printk("xlj pwm request pwm %d fail!\n", pwm_id);
+	} else {
+		printk("xlj pwm request pwm %d success!\n", pwm_id);
+	}
+
+	return pwm_dev;
+}
+
+#if TEST_PWM
+static void test_ioctl_pwm(xlj_pwm * xpwm, u32 freq, u32 div, u32 pol)
+{
+	xpwm->pwminfo.divides = div;
+	xpwm->pwminfo.polarity = pol;
+	xpwm->pwminfo.period_ns = 1000 * 1000 * 1000 / freq;
+	xpwm->pwminfo.duty_ns = (divides * xpwm->pwminfo.period_ns) / 256;	//like 11% 25% is also OK !
+	pwm_set_polarity(xpwm->pwm_dev, xpwm->pwminfo.polarity);
+	pwm_config(xpwm->pwm_dev, xpwm->pwminfo.duty_ns,
+		   xpwm->pwminfo.period_ns);
+
+	pwm_enable(xpwm->pwm_dev);
+}
+#endif
+
+/*
+   default initializition
+*/
+static void xlj_pwm_setup(xlj_pwm * xpwm)
+{
+	xpwm->pwminfo.channel = XLJ_PWM_CHANNEL;
+	xpwm->pwm_dev = platform_pwm_request(xpwm->pwminfo.channel);
+	//TODO -----  Default
+#if TEST_PWM
+	int retry = 6;
+	while (retry--) {
+		test_ioctl_pwm(xpwm, 2000, 30, 1);
+		msleep(1);
+	}
+#endif
+}
 
 static int xpwm_open(struct inode *inode, struct file *filp)
 {
@@ -52,58 +100,43 @@ static int xpwm_release(struct inode *inode, struct file *filp)
    pwm.setEnabled(true);
 */
 
-static long xpwm_unlocked_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
+static long xpwm_unlocked_ioctl(struct file *filp, unsigned int cmd,
+				unsigned long arg)
 {
+
+	switch (cmd) {
+	case PWM_CONFIG:{
+			// tripple args to be checked
+			xpwm->pwminfo.divides = div;
+			xpwm->pwminfo.polarity = pol;
+			xpwm->pwminfo.period_ns = 1000 * 1000 * 1000 / freq;
+			xpwm->pwminfo.duty_ns = (divides * xpwm->pwminfo.period_ns) / 256;	//like 11% 25% is also OK !
+			pwm_set_polarity(xpwm->pwm_dev, xpwm->pwminfo.polarity);
+			pwm_config(xpwm->pwm_dev, xpwm->pwminfo.duty_ns,
+				   xpwm->pwminfo.period_ns);
+		}
+		break;
+	case PWM_ONOFF:{
+			if (1) {
+				pwm_enable(xpwm->pwm_dev);
+			} else {
+				pwm_disable(xpwm->pwm_dev);
+			}
+		}
+		break;
+	default:
+		break;
+	}
+
 	return 0;
 }
 
 static struct file_operations xpwm_fops = {
-	.owner      = THIS_MODULE,
-	.open       = xpwm_open,
-	.release    = xpwm_release,
+	.owner = THIS_MODULE,
+	.open = xpwm_open,
+	.release = xpwm_release,
 	.unlocked_ioctl = xpwm_unlocked_ioctl,
 };
-
-static struct pwm_device *platform_pwm_request(int pwm_id)
-{
-	struct pwm_device *pwm_dev;
-
-	pwm_dev = pwm_request(pwm_id, "xlj-pwm");
-	if(NULL == pwm_dev || IS_ERR(pwm_dev)) {
-		printk("xlj pwm request pwm %d fail!\n", pwm_id);
-	} else {
-		printk("xlj pwm request pwm %d success!\n", pwm_id);
-	}
-
-	return pwm_dev;
-}
-
-#if TEST_PWM
-static void test_ioctl_pwm(xlj_pwm *xpwm)
-{
-	int divides = 30;
-	xpwm->pwminfo.polarity = 1;
-	xpwm->pwminfo.period_ns = 1000*1000*1000 / 20000;
-	xpwm->pwminfo.duty_ns = (divides * xpwm->pwminfo.period_ns) / 256; //like 11% 25% is also OK !
-	pwm_set_polarity(xpwm->pwm_dev, xpwm->pwminfo.polarity);
-	pwm_config(xpwm->pwm_dev, xpwm->pwminfo.duty_ns, xpwm->pwminfo.period_ns);
-	pwm_enable(xpwm->pwm_dev);
-}
-#endif
-
-static void xlj_pwm_setup(xlj_pwm *xpwm)
-{
-	xpwm->pwminfo.channel = 0;
-	xpwm->pwm_dev = platform_pwm_request(xpwm->pwminfo.channel);	
-
-#if TEST_PWM
-	int retry = 6;
-	while (retry--) {
-		test_ioctl_pwm(xpwm);
-		msleep(1);
-	}
-#endif
-}
 
 static int __devinit xlj_pwm_probe(struct platform_device *pdev)
 {
@@ -131,7 +164,8 @@ static int __devinit xlj_pwm_probe(struct platform_device *pdev)
 		goto fail1;
 	}
 
-	xpwm->device = device_create(xpwm->class, NULL, xpwm->devid, NULL, DEVNAME);
+	xpwm->device =
+	    device_create(xpwm->class, NULL, xpwm->devid, NULL, DEVNAME);
 	if (!xpwm->device) {
 		printk("xlj pwm create device failed\n");
 		goto fail2;
@@ -142,11 +176,11 @@ static int __devinit xlj_pwm_probe(struct platform_device *pdev)
 
 	return 0;
 
-fail2:
+      fail2:
 	device_destroy(xpwm->class, xpwm->devid);
-fail1:
+      fail1:
 	class_destroy(xpwm->class);
-fail0:
+      fail0:
 	cdev_del(&xpwm->cdev);
 	kfree(xpwm);
 
@@ -162,22 +196,22 @@ static struct platform_driver xlj_pwm_driver = {
 	.probe = xlj_pwm_probe,
 	.remove = xlj_pwm_remove,
 	.driver = {
-		.name = "xlj_pwm",
-		.owner = THIS_MODULE,
-	},
+		   .name = "xlj_pwm",
+		   .owner = THIS_MODULE,
+		   },
 };
 
 static void xlj_pwm_release(struct device *dev)
 {
-	return ;
+	return;
 }
 
 static struct platform_device xlj_pwm_device = {
-	.name   = "xlj_pwm",
+	.name = "xlj_pwm",
 	.id = -1,
 	.dev = {
 		.release = xlj_pwm_release,
-	},
+		},
 };
 
 static __init int module_xlj_pwm_init(void)
