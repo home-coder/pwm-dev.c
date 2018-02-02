@@ -15,8 +15,18 @@
 #include <linux/pwm.h>
 
 #define DEVNAME            "xlj-pwm"
-#define TEST_PWM		   1
+#define TEST_PWM		   0
 #define XLJ_PWM_CHANNEL    0
+
+#define XLJ_PWM_IOC_MAGIC 'm'
+#define PWM_CONFIG _IOW(XLJ_PWM_IOC_MAGIC,0,int)
+#define PWM_ONOFF _IOW(XLJ_PWM_IOC_MAGIC, 1, int)
+
+struct config_wrapper {
+	u32 freq;
+	u32 div;
+	u32 pol;
+} cwrapper;
 
 typedef struct {
 	u32 channel;
@@ -56,7 +66,7 @@ static void test_ioctl_pwm(xlj_pwm * xpwm, u32 freq, u32 div, u32 pol)
 	xpwm->pwminfo.divides = div;
 	xpwm->pwminfo.polarity = pol;
 	xpwm->pwminfo.period_ns = 1000 * 1000 * 1000 / freq;
-	xpwm->pwminfo.duty_ns = (divides * xpwm->pwminfo.period_ns) / 256;	//like 11% 25% is also OK !
+	xpwm->pwminfo.duty_ns = (div * xpwm->pwminfo.period_ns) / 256;	//like 11% 25% is also OK !
 	pwm_set_polarity(xpwm->pwm_dev, xpwm->pwminfo.polarity);
 	pwm_config(xpwm->pwm_dev, xpwm->pwminfo.duty_ns,
 		   xpwm->pwminfo.period_ns);
@@ -84,6 +94,11 @@ static void xlj_pwm_setup(xlj_pwm * xpwm)
 
 static int xpwm_open(struct inode *inode, struct file *filp)
 {
+	xlj_pwm *xpwm = container_of(inode->i_cdev,
+				     xlj_pwm, cdev);
+
+	filp->private_data = xpwm;
+
 	return 0;
 }
 
@@ -103,21 +118,32 @@ static int xpwm_release(struct inode *inode, struct file *filp)
 static long xpwm_unlocked_ioctl(struct file *filp, unsigned int cmd,
 				unsigned long arg)
 {
+	int ret = -1;
+	unsigned long pwmonoff = 0;
+	xlj_pwm *xpwm = filp->private_data;
 
 	switch (cmd) {
 	case PWM_CONFIG:{
 			// tripple args to be checked
-			xpwm->pwminfo.divides = div;
-			xpwm->pwminfo.polarity = pol;
-			xpwm->pwminfo.period_ns = 1000 * 1000 * 1000 / freq;
-			xpwm->pwminfo.duty_ns = (divides * xpwm->pwminfo.period_ns) / 256;	//like 11% 25% is also OK !
+			ret = copy_from_user(&cwrapper,
+					     (struct config_wrapper __user *)arg,
+					     sizeof(struct config_wrapper));
+			if (ret) {
+				return -EFAULT;
+			}
+
+			xpwm->pwminfo.divides = cwrapper.div;
+			xpwm->pwminfo.polarity = cwrapper.pol;
+			xpwm->pwminfo.period_ns = 1000 * 1000 * 1000 / cwrapper.freq;
+			xpwm->pwminfo.duty_ns = (cwrapper.div * xpwm->pwminfo.period_ns) / 256;	//like 11% 25% is also OK !
 			pwm_set_polarity(xpwm->pwm_dev, xpwm->pwminfo.polarity);
 			pwm_config(xpwm->pwm_dev, xpwm->pwminfo.duty_ns,
 				   xpwm->pwminfo.period_ns);
 		}
 		break;
 	case PWM_ONOFF:{
-			if (1) {
+			get_user(pwmonoff, (unsigned long __user*)arg);
+			if (pwmonoff) {
 				pwm_enable(xpwm->pwm_dev);
 			} else {
 				pwm_disable(xpwm->pwm_dev);
