@@ -122,31 +122,41 @@ static long xpwm_unlocked_ioctl(struct file *filp, unsigned int cmd,
 	unsigned long pwmonoff = 0;
 	xlj_pwm *xpwm = filp->private_data;
 
+	printk("user space ioctl ops cut----\n");
 	switch (cmd) {
 	case PWM_CONFIG:{
 			// tripple args to be checked
 			ret = copy_from_user(&cwrapper,
-					     (struct config_wrapper __user *)arg,
+					     (struct config_wrapper __user *)
+					     arg,
 					     sizeof(struct config_wrapper));
 			if (ret) {
+				printk("copy user failed\n");
 				return -EFAULT;
 			}
 
 			xpwm->pwminfo.divides = cwrapper.div;
 			xpwm->pwminfo.polarity = cwrapper.pol;
-			xpwm->pwminfo.period_ns = 1000 * 1000 * 1000 / cwrapper.freq;
+			xpwm->pwminfo.period_ns =
+			    1000 * 1000 * 1000 / cwrapper.freq;
 			xpwm->pwminfo.duty_ns = (cwrapper.div * xpwm->pwminfo.period_ns) / 256;	//like 11% 25% is also OK !
 			pwm_set_polarity(xpwm->pwm_dev, xpwm->pwminfo.polarity);
+
+			printk("div:%d, polarity:%d, period_ns:%d\n",
+			       xpwm->pwminfo.divides, xpwm->pwminfo.polarity,
+			       xpwm->pwminfo.period_ns);
 			pwm_config(xpwm->pwm_dev, xpwm->pwminfo.duty_ns,
 				   xpwm->pwminfo.period_ns);
 		}
 		break;
 	case PWM_ONOFF:{
-			get_user(pwmonoff, (unsigned long __user*)arg);
+			get_user(pwmonoff, (unsigned long __user *)arg);
 			if (pwmonoff) {
 				pwm_enable(xpwm->pwm_dev);
+				printk("pwm enable ...\n");
 			} else {
 				pwm_disable(xpwm->pwm_dev);
+				printk("pwm disable ...\n");
 			}
 		}
 		break;
