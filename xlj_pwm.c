@@ -14,7 +14,8 @@
 #include <linux/string.h>
 #include <linux/pwm.h>
 
-#define DEVNAME "xlj-pwm"
+#define DEVNAME     "xlj-pwm"
+#define TEST_PWM    1 
 
 typedef struct {
 	u32 channel;
@@ -43,6 +44,14 @@ static int xpwm_release(struct inode *inode, struct file *filp)
 	return 0;
 }
 
+/*
+   AndroidThings Example Below:
+   The following example configures the PWM to cycle at 120Hz (period of 8.33ms) with a duty of 25% (on-time of 2.08ms every cycle):
+   pwm.setPwmFrequencyHz(120);
+   pwm.setPwmDutyCycle(25);
+   pwm.setEnabled(true);
+*/
+
 static long xpwm_unlocked_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 {
 	return 0;
@@ -69,26 +78,31 @@ static struct pwm_device *platform_pwm_request(int pwm_id)
 	return pwm_dev;
 }
 
+#if TEST_PWM
 static void test_ioctl_pwm(xlj_pwm *xpwm)
 {
 	int divides = 30;
 	xpwm->pwminfo.polarity = 1;
 	xpwm->pwminfo.period_ns = 1000*1000*1000 / 20000;
-	xpwm->pwminfo.duty_ns = (divides * xpwm->pwminfo.period_ns) / 256;
+	xpwm->pwminfo.duty_ns = (divides * xpwm->pwminfo.period_ns) / 256; //like 11% 25% is also OK !
 	pwm_set_polarity(xpwm->pwm_dev, xpwm->pwminfo.polarity);
 	pwm_config(xpwm->pwm_dev, xpwm->pwminfo.duty_ns, xpwm->pwminfo.period_ns);
 	pwm_enable(xpwm->pwm_dev);
 }
+#endif
 
 static void xlj_pwm_setup(xlj_pwm *xpwm)
 {
-	xpwm->pwminfo.channel = 1;
+	xpwm->pwminfo.channel = 0;
 	xpwm->pwm_dev = platform_pwm_request(xpwm->pwminfo.channel);	
-	//FIXME test pwm function
-	while (1) {
+
+#if TEST_PWM
+	int retry = 6;
+	while (retry--) {
 		test_ioctl_pwm(xpwm);
 		msleep(1);
 	}
+#endif
 }
 
 static int __devinit xlj_pwm_probe(struct platform_device *pdev)
@@ -153,9 +167,17 @@ static struct platform_driver xlj_pwm_driver = {
 	},
 };
 
+static void xlj_pwm_release(struct device *dev)
+{
+	return ;
+}
+
 static struct platform_device xlj_pwm_device = {
 	.name   = "xlj_pwm",
 	.id = -1,
+	.dev = {
+		.release = xlj_pwm_release,
+	},
 };
 
 static __init int module_xlj_pwm_init(void)
